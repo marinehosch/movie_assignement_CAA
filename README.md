@@ -1,4 +1,4 @@
-# movie explorer - Cloud and Advanced Analytics assignement 1
+# Movie explorer - Cloud and Advanced Analytics assignement 1
 A serverless web application built with streamilt and BigQuery that allows users to explore a dataset of 20 million movie ratings. The app is containerized with Docker and deployed on Google Cloud Run. 
 
 ## URL 

@@ -4,34 +4,37 @@ import pandas as pd
 import requests
 
 # --- 1. CONFIGURATION & CONNECTION ---
-st.set_page_config(page_title="Cloud & Analytics 2025 - Movies", layout="wide")
+st.set_page_config(page_title="Cloud & Analytics 2026 - Movies", layout="wide")
 
 @st.cache_resource
 def get_bq_client():
-    """Initializes the BigQuery client."""
     return bigquery.Client()
 
 client = get_bq_client()
 
-# IDs confirmed from your Cloud Console
+# ID from Cloud Console and API key
 DATASET_ID = "cloud-and-analytics-487915.assignment_movies" 
 TMDB_API_KEY = "b014aa1c048829a81aa67568c6d2957c" 
 
 # --- 2. LOGIC FUNCTIONS ---
+@st.cache_data
+#dynamic filter 
+def get_filter_options(column_name):
+    query = f"SELECT DISTINCT {column_name} FROM `{DATASET_ID}.movies` WHERE {column_name} IS NOT NULL ORDER BY {column_name}"
+    df = client.query(query).to_dataframe()
+    return ["All"] + df[column_name].tolist()
 
 def run_query(query):
-    """Executes the query and logs the SQL to the terminal (Assignment Requirement)."""
     print(f"\n--- EXECUTING SQL QUERY ---\n{query}\n---------------------------\n")
     query_job = client.query(query)
     return query_job.to_dataframe()
 
 def get_movie_poster(tmdb_id):
-    """Fetches the poster URL via TMDB API."""
     if not tmdb_id or pd.isna(tmdb_id):
         return None
     try:
-        clean_id = int(float(tmdb_id))
-        url = f"https://api.themoviedb.org/3/movie/{clean_id}?api_key={TMDB_API_KEY}&language=en-US"
+        int_id = int(float(tmdb_id))
+        url = f"https://api.themoviedb.org/3/movie/{int_id}?api_key={TMDB_API_KEY}&language=en-US"
         data = requests.get(url, timeout=5).json()
         if 'poster_path' in data and data['poster_path']:
             return f"https://image.tmdb.org/t/p/w500{data['poster_path']}"
@@ -39,14 +42,14 @@ def get_movie_poster(tmdb_id):
         return None
     return None
 
-# --- 3. USER INTERFACE (UI) ---
+# --- 3. USER INTERFACE  ---
 
-st.title("🎬 Movie Explorer 2025")
+st.title("🎬 Movie Explorer 2026")
 st.markdown("---")
 
-st.subheader("🔍 Search Parameters")
+st.subheader("🔍 Search")
 
-# Main search bar (contains mode)
+# Main search bar 
 movie_input = st.text_input("Search for a movie title...", placeholder="e.g., Toy Story, Batman...")
 
 # Filters in 3 columns
@@ -55,27 +58,42 @@ col_lang, col_year, col_rating = st.columns(3)
 with col_lang:
     selected_lang = st.selectbox("Language", ["en", "fr", "es", "de", "hi", "it", "ja"])
 with col_year:
-    min_year = st.number_input("Minimum Release Year", min_value=1900, max_value=2025, value=2010)
+    min_year = st.slider("Minimum Release Year", min_value=1900, max_value=2026, value=2010)
 with col_rating:
     min_rating = st.slider("Minimum Average Rating", 0.0, 5.0, 3.5, step=0.1)
+
+#ajouter les filtres genre et country sur 2 colonnes sur la ligne en dessous 
+col_genres, col_countries = st.columns(2)
+
+with col_genres:
+    all_genres = get_filter_options("genres")
+    genres = st.selectbox("Genres", all_genres)
+
+with col_countries:
+    all_countries = get_filter_options("country")
+    country = st.selectbox("Country", all_countries)
 
 search_button = st.button("Search Movies", use_container_width=True)
 
 st.markdown("---")
 
-# --- 4. RESULTS PROCESSING ---
+# --- 4. RESULTS ---
 
 if search_button:
-    # SQL robustness: handle apostrophes and use % for "contains" search
     safe_input = movie_input.replace("'", "''")
+
+    genre_filter = "" if selected_genre == "All" else f"AND genres LIKE '%{selected_genre}%'"
+    country_filter = "" if selected_country == "All" else f"AND country = '{selected_country}'"
     
     query = f"""
         WITH filtered_movies AS (
-            SELECT movieId, title, tmdbId, genres, release_year, language
+            SELECT movieId, title, tmdbId, genres, release_year, language, country
             FROM `{DATASET_ID}.movies`
             WHERE LOWER(title) LIKE LOWER('%{safe_input}%')
             AND language = '{selected_lang}'
             AND release_year >= {min_year}
+            {genre_filter}
+            {country_filter}
         )
         SELECT 
             m.*, 
@@ -96,7 +114,6 @@ if search_button:
             if not results_df.empty:
                 st.write(f"### {len(results_df)} movies found")
                 
-                # Display movies in a list
                 for index, row in results_df.iterrows():
                     with st.container():
                         c1, c2 = st.columns([1, 3])
@@ -110,10 +127,8 @@ if search_button:
                         
                         with c2:
                             st.subheader(row['title'])
-                            st.write(f"📅 **Year:** {row['release_year']} | 🌍 **Language:** {row['language'].upper()}")
+                            st.write(f"📅 **Year:** {row['release_year']} | 🌍 **Language:** {row['language'].upper()} | 🌏 **Country:** {row['country']}")
                             st.write(f"🎭 **Genres:** {row['genres']}")
-                            
-                            # Display ratings
                             if row['avg_rating'] and row['avg_rating'] > 0:
                                 st.success(f"⭐ **Rating: {row['avg_rating']}/5** ({int(row['review_count'])} reviews)")
                             else:

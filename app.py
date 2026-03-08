@@ -19,11 +19,25 @@ TMDB_API_KEY = "b014aa1c048829a81aa67568c6d2957c"
 # --- 2. LOGIC FUNCTIONS ---
 @st.cache_data
 #dynamic filter 
-def get_filter_options(column_name):
-    query = f"SELECT DISTINCT {column_name} FROM `{DATASET_ID}.movies` WHERE {column_name} IS NOT NULL ORDER BY {column_name}"
+def get_unique_genres():
+    """Extracts unique individual genres from the 'Action|Horror|Sci-Fi' format."""
+    query = f"""
+        SELECT DISTINCT genre
+        FROM `{DATASET_ID}.movies`,
+        UNNEST(SPLIT(genres, '|')) AS genre
+        WHERE genre IS NOT NULL AND genre <> '(no genres listed)'
+        ORDER BY genre
+    """
     df = client.query(query).to_dataframe()
-    return ["All"] + df[column_name].tolist()
+    return df['genre'].tolist()
 
+@st.cache_data
+def get_unique_countries():
+    """Fetch unique countries."""
+    query = f"SELECT DISTINCT country FROM `{DATASET_ID}.movies` WHERE country IS NOT NULL ORDER BY country"
+    df = client.query(query).to_dataframe()
+    return df['country'].tolist()
+    
 def run_query(query):
     print(f"\n--- EXECUTING SQL QUERY ---\n{query}\n---------------------------\n")
     query_job = client.query(query)
@@ -66,12 +80,12 @@ with col_rating:
 col_genres, col_countries = st.columns(2)
 
 with col_genres:
-    all_genres = get_filter_options("genres")
-    genres = st.selectbox("Genres", all_genres)
+    genre_options = get_unique_genres()
+    selected_genres = st.multiselect("Genres (Select one or more)", genre_options)
 
 with col_countries:
-    all_countries = get_filter_options("country")
-    country = st.selectbox("Country", all_countries)
+    country_options = get_unique_countries()
+    selected_countries = st.multiselect("Countries (Select one or more)", country_options)
 
 search_button = st.button("Search Movies", use_container_width=True)
 
@@ -82,8 +96,18 @@ st.markdown("---")
 if search_button:
     safe_input = movie_input.replace("'", "''")
 
-    genre_filter = "" if selected_genre == "All" else f"AND genres LIKE '%{selected_genre}%'"
-    country_filter = "" if selected_country == "All" else f"AND country = '{selected_country}'"
+    genre_conditions = []
+    for g in selected_genres:
+        genre_conditions.append(f"genres LIKE '%{g}%'")
+    
+    genre_filter = ""
+    if genre_conditions:
+        genre_filter = "AND (" + " OR ".join(genre_conditions) + ")"    
+        
+    country_filter = "" 
+    if selected_countries: 
+        countries_str = "', '".join([c.replace("'", "''") for c in selected_countries])
+        country_filter = f"AND country IN ('{countries_str}')"
     
     query = f"""
         WITH filtered_movies AS (
@@ -96,12 +120,25 @@ if search_button:
             {country_filter}
         )
         SELECT 
-            m.*, 
+            m.movieId, 
+            m.title, 
+            m.tmdbId, 
+            m.genres, 
+            m.release_year, 
+            m.language, 
+            m.country,
             ROUND(AVG(r.rating), 2) as avg_rating,
             COUNT(r.rating) as review_count
         FROM filtered_movies AS m
         LEFT JOIN `{DATASET_ID}.ratings` AS r ON m.movieId = r.movieId
-        GROUP BY m.movieId, m.title, m.tmdbId, m.genres, m.release_year, m.language
+        GROUP BY 
+            m.movieId, 
+            m.title, 
+            m.tmdbId, 
+            m.genres, 
+            m.release_year, 
+            m.language, 
+            m.country
         HAVING (avg_rating >= {min_rating} OR avg_rating IS NULL)
         ORDER BY avg_rating DESC, review_count DESC
         LIMIT 20
